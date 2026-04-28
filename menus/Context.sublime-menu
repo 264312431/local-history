@@ -15,27 +15,12 @@
                 "children":
                 [
                     {
-                        "caption": "Open",
-                        "command": "history_open_snapshot"
-                    },
-                    {
                         "caption": "Create",
                         "command": "history_create_snapshot"
                     },
                     {
-                        "caption": "Diff",
-                        "command": "history_open_snapshot",
-                        "args": {"compare": true}
-                    },
-                    {
-                        "caption": "Diff & Replace with snapshot",
-                        "command": "history_open_snapshot",
-                        "args": {"replace": true}
-                    },
-                    {
-                        "caption": "Compare side-by-side with snapshot",
-                        "command": "history_open_snapshot",
-                        "args": {"sbs": true}
+                        "caption": "Create Named",
+                        "command": "history_create_named_snapshot"
                     }
                 ]
             },

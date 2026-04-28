@@ -61,6 +61,26 @@ def get_history_files(file_name, history_dir):
 
     return history_files
 
+def history_entry_name(file_name, history_dir):
+    file_root, file_extension = os.path.splitext(file_name)
+    timestamp_format = settings.get('format_timestamp', '%Y%m%d%H%M%S')
+    has_n = '{n}' in timestamp_format
+    now = datetime.datetime.now()
+
+    for i in range(1, 10000):
+        seq = '{0:02d}'.format(i)
+        stamp = now.strftime(timestamp_format.replace('{n}', seq))
+        if has_n:
+            candidate = '{0}-{1}{2}'.format(file_root, stamp, file_extension)
+        elif i == 1:
+            candidate = '{0}-{1}{2}'.format(file_root, stamp, file_extension)
+        else:
+            candidate = '{0}-{1}-{2}{3}'.format(file_root, stamp, seq, file_extension)
+        if not os.path.exists(os.path.join(history_dir, candidate)):
+            return candidate
+
+    raise RuntimeError('Unable to create a unique history entry name.')
+
 def filtered_history_files(files):
     '''Only show file name in quick panel, not path'''
     if not settings.get('show_full_path', True):
@@ -221,8 +241,8 @@ class HistorySave(sublime_plugin.EventListener):
                     status_msg('File not saved, recent backup for "' + file_name + '" exists.')
                     return
 
-        file_root, file_extension = os.path.splitext(file_name)
-        shutil.copyfile(file_path, os.path.join(history_dir, '{0}-{1}{2}'.format(file_root, datetime.datetime.now().strftime(settings.get('format_timestamp', '%Y%m%d%H%M%S')), file_extension)))
+        history_file = history_entry_name(file_name, history_dir)
+        shutil.copyfile(file_path, os.path.join(history_dir, history_file))
 
         status_msg('File saved, updated Local History for "' + file_name + '".')
 
@@ -441,28 +461,55 @@ class HistoryDeleteAll(sublime_plugin.TextCommand):
 
 class HistoryCreateSnapshot(sublime_plugin.TextCommand):
 
+    def run(self, edit):
+        v = self.view
+        file_name = os.path.basename(v.file_name())
+        history_dir = get_history_subdir(v.file_name())
+        if not os.path.exists(history_dir):
+            os.makedirs(history_dir)
+        snapshot_name = history_entry_name(file_name, history_dir)
+        shutil.copyfile(v.file_name(), os.path.join(history_dir, snapshot_name))
+        status_msg('File snapshot saved under "' + snapshot_name + '".')
+
+class HistoryCreateNamedSnapshot(sublime_plugin.TextCommand):
+
     def on_done(self, string):
-        self.string = string
-        self.view.window().run_command('history_create_snapshot', {"callback": True})
+        v = self.view
+        file_name = os.path.basename(v.file_name())
+        pre, ext = os.path.splitext(file_name)
+        history_dir = get_history_subdir(v.file_name())
+        if not os.path.exists(history_dir):
+            os.makedirs(history_dir)
 
-    def run(self, edit, callback=None):
+        label = string.strip()
+        if not label:
+            status_msg('Snapshot name cannot be empty.')
+            return
 
-        if not callback:
-            v = self.view
+        snapshot_name = pre + " # " + label + ext
+        snapshot_path = os.path.join(history_dir, snapshot_name)
+        if os.path.exists(snapshot_path):
+            choice = sublime.yes_no_cancel_dialog(
+                'A snapshot with this name already exists.',
+                'Auto-rename',
+                'Overwrite'
+            )
+            if choice == sublime.DIALOG_CANCEL:
+                status_msg('Snapshot creation canceled.')
+                return
+            elif choice == sublime.DIALOG_YES:
+                i = 2
+                while os.path.exists(snapshot_path):
+                    snapshot_name = pre + " # " + label + " ({0})".format(i) + ext
+                    snapshot_path = os.path.join(history_dir, snapshot_name)
+                    i += 1
 
-            file_name = os.path.basename(v.file_name())
-            self.pre, self.ext = os.path.splitext(file_name)
-            c = "Enter a name for this snapshot:  "
-            s = ""
+        shutil.copyfile(v.file_name(), snapshot_path)
+        status_msg('File snapshot saved under "' + snapshot_name + '".')
 
-            v.window().show_input_panel(c, s, self.on_done, None, None)
-
-        else:
-            v = self.view
-            file_name = self.pre + " # " + self.string + self.ext
-            history_dir = get_history_subdir(v.file_name())
-            shutil.copyfile(v.file_name(), os.path.join(history_dir, file_name))
-            status_msg('File snapshot saved under "' + file_name + '".')
+    def run(self, edit):
+        c = "Enter a name for this snapshot:  "
+        self.view.window().show_input_panel(c, "", self.on_done, None, None)
 
 class HistoryOpenSnapshot(sublime_plugin.TextCommand):
 
@@ -666,11 +713,8 @@ class HistoryMenu(sublime_plugin.TextCommand):
 
         choice = [
             ["Diff with history"],
-            ["Diff wih snapshot"],
             ["Diff & Replace with history"],
-            ["Diff & Replace wih snapshot"],
             ["Compare Side-By-Side with history"],
-            ["Compare Side-By-Side wih snapshot"],
         ]
 
         def on_done(index):
@@ -679,65 +723,26 @@ class HistoryMenu(sublime_plugin.TextCommand):
             if index == 0:
                 self.view.window().run_command('history_compare')
             elif index == 1:
-                self.view.window().run_command('history_open_snapshot', {"compare": True})
-            if index == 2:
                 self.view.window().run_command('history_replace')
-            elif index == 3:
-                self.view.window().run_command('history_open_snapshot', {"replace": True})
-            elif index == 4:
-                self.view.window().run_command('history_compare', {"sbs": True})
-            elif index == 5:
-                self.view.window().run_command('history_open_snapshot', {"sbs": True})
-        sbs = check_sbs_compare()
-        choice = choice if sbs else choice[:4]
-        self.view.window().show_quick_panel(choice, on_done)
-
-    def snapshots(self):
-
-        choice = [
-            ["Open"],
-            ["Create"],
-            ["Delete"],
-            ["Compare"],
-            ["Compare & Replace"],
-            ["Compare Side-By-Side wih snapshot"],
-        ]
-
-        def on_done(index):
-            if index is NO_SELECTION:
-                return
-            elif index == 0:
-                self.view.window().run_command('history_open_snapshot')
-            elif index == 1:
-                self.view.window().run_command('history_create_snapshot')
             elif index == 2:
-                self.view.window().run_command('history_open_snapshot', {"delete": True})
-            elif index == 3:
-                self.view.window().run_command('history_open_snapshot', {"compare": True})
-            elif index == 4:
-                self.view.window().run_command('history_open_snapshot', {"replace": True})
-            elif index == 5 and sbs:
-                self.view.window().run_command('history_open_snapshot', {"sbs": True})
-
+                self.view.window().run_command('history_compare', {"sbs": True})
         sbs = check_sbs_compare()
-        choice = choice if sbs else choice[:5]
+        choice = choice if sbs else choice[:2]
         self.view.window().show_quick_panel(choice, on_done)
 
-    def run(self, edit, compare=False, snapshots=False):
+    def run(self, edit, compare=False):
 
         choice = (
             ["Open history"],
             ["Compare & Replace"],
-            ["Snapshots"],
+            ["Create snapshot"],
+            ["Create named snapshot"],
             ["Browse in Explorer"],
             ["Delete history"]
         )
 
         if compare:
             self.compare()
-            return
-        elif snapshots:
-            self.snapshots()
             return
 
         def on_done(index):
@@ -748,10 +753,12 @@ class HistoryMenu(sublime_plugin.TextCommand):
             elif index == 1:
                 self.view.window().run_command('history_menu', {"compare": True})
             elif index == 2:
-                self.view.window().run_command('history_menu', {"snapshots": True})
+                self.view.window().run_command('history_create_snapshot')
             elif index == 3:
-                self.view.window().run_command('history_browse')
+                self.view.window().run_command('history_create_named_snapshot')
             elif index == 4:
+                self.view.window().run_command('history_browse')
+            elif index == 5:
                 self.view.window().run_command('history_delete')
 
         self.view.window().show_quick_panel(choice, on_done)

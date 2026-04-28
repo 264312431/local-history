@@ -17,15 +17,14 @@
         "command": "history_save_now"
     },
     {
-        "caption": "Local History: Snapshots",
-        "command": "history_menu",
-        "args": {"snapshots": true}
-    },
-    {
         "caption": "Local History: Create Snapshot",
         "command": "history_create_snapshot"
     },
-{
+    {
+        "caption": "Local History: Create Named Snapshot",
+        "command": "history_create_named_snapshot"
+    },
+    {
         "caption": "Local History: Menu",
         "command": "history_menu"
     },
