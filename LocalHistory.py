@@ -63,23 +63,28 @@ def get_history_files(file_name, history_dir):
 
 def history_entry_name(file_name, history_dir):
     file_root, file_extension = os.path.splitext(file_name)
-    timestamp_format = settings.get('format_timestamp', '%Y%m%d%H%M%S')
-    has_n = '{n}' in timestamp_format
+    timestamp_format = settings.get('format_timestamp', '{n}')
+    if not isinstance(timestamp_format, str):
+        timestamp_format = str(timestamp_format)
     now = datetime.datetime.now()
 
     for i in range(1, 10000):
-        seq = '{0:02d}'.format(i)
-        stamp = now.strftime(timestamp_format.replace('{n}', seq))
-        if has_n:
-            candidate = '{0}-{1}{2}'.format(file_root, stamp, file_extension)
-        elif i == 1:
-            candidate = '{0}-{1}{2}'.format(file_root, stamp, file_extension)
-        else:
-            candidate = '{0}-{1}-{2}{3}'.format(file_root, stamp, seq, file_extension)
+        seq = '{0:04d}'.format(i)
+        stamp_template = timestamp_format.replace('{n}', seq).replace('%n', seq)
+        stamp = now.strftime(stamp_template).replace('{n}', seq).replace('%n', seq)
+        candidate = '{0}-{1}{2}'.format(file_root, stamp, file_extension)
         if not os.path.exists(os.path.join(history_dir, candidate)):
             return candidate
 
     raise RuntimeError('Unable to create a unique history entry name.')
+
+def is_inside_history_root(file_path):
+    history_root = os.path.abspath(get_history_root())
+    target_path = os.path.abspath(file_path)
+    try:
+        return os.path.commonpath([target_path, history_root]) == history_root
+    except ValueError:
+        return False
 
 def filtered_history_files(files):
     '''Only show file name in quick panel, not path'''
@@ -211,6 +216,10 @@ class HistorySave(sublime_plugin.EventListener):
 
         if not os.path.isfile(file_path):
             status_msg('File not saved, might be part of a package.')
+            return
+
+        if is_inside_history_root(file_path):
+            status_msg('File not saved, ignored history/snapshot file.')
             return
 
         size_limit = settings.get('file_size_limit', 4194304)
