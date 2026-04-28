@@ -63,7 +63,7 @@ def get_history_files(file_name, history_dir):
 
 def history_entry_name(file_name, history_dir):
     file_root, file_extension = os.path.splitext(file_name)
-    timestamp_format = settings.get('format_timestamp', '%Y%m%d%H%M%S')
+    timestamp_format = settings.get('format_timestamp', '{n}')
     if not isinstance(timestamp_format, str):
         timestamp_format = str(timestamp_format)
     now = datetime.datetime.now()
