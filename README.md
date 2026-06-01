@@ -1,3 +1,5 @@
+(my humble attempt to fix some of the fatal flaws in this otherwise great plugin)
+
 # Local History
 
 [![GitHub license](https://img.shields.io/github/license/vishr/local-history.svg?style=flat-square)](https://github.com/vishr/local-history/tree/master/LICENSE.md)
