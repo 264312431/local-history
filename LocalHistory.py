@@ -12,6 +12,29 @@ import subprocess
 import sublime
 import sublime_plugin
 
+
+def print_panel( message):
+    # return print(message)
+    window = sublime.active_window()
+    panel = window.find_output_panel("local_history_panel")
+    if panel is None:
+        panel = window.create_output_panel("local_history_panel")
+        panel.settings().set("result_file_regex", r"^(.+):(\d+):(\d+)")
+    
+    window.run_command("show_panel", {"panel": "output.local_history_panel"})
+    panel.run_command("append", {"characters": message + "\n"})
+
+def clear_panel():
+    window = sublime.active_window()
+    panel = window.find_output_panel("local_history_panel")
+    if panel is not None:
+        panel.run_command("select_all")
+        panel.run_command("right_delete")
+        
+def my_log(msg):
+    # print_panel(msg)
+    print("LOCALHISTORY: " + msg)
+
 PY2 = sys.version_info < (3, 0)
 
 if PY2:
@@ -20,10 +43,14 @@ else:
     from math import log2
 
 NO_SELECTION = -1
+
+my_log("Running in python " + str(sys.version_info))
+
 settings = None
 
 def status_msg(msg):
-    sublime.status_message('Local History: ' + msg)
+    my_log("# status_msg:\n" + msg)
+    sublime.status_message('# LOCAL HISTORY: ' + msg)
 
 def readable_file_size(size):
     suffixes = ['bytes', 'KB', 'MB', 'GB', 'TB', 'EB', 'ZB']
@@ -52,14 +79,90 @@ def get_history_subdir(file_path):
 
     return os.path.join(history_root, file_dir)
 
-def get_history_files(file_name, history_dir):
+def get_history_files0(file_name, history_dir):
     file_root, file_extension = os.path.splitext(file_name)
     history_files = [os.path.join(dirpath, f)
                         for dirpath, dirnames, files in os.walk(history_dir)
                         for f in files if f.startswith(file_root) and f.endswith(file_extension)]
+
     history_files.sort(key=lambda f: os.path.getmtime(os.path.join(history_dir, f)), reverse=True)
+    print_panel("#  get_history_files for: " + file_name + " in " + str(history_dir) + " :\n" + str(history_files))
+    return history_files
+
+def get_history_files1(file_name, history_dir, indent_level=0):
+    # Setup indentation strings
+    base_indent = "    " * indent_level
+    item_indent = "    " * (indent_level + 1)
+
+    # Get the basename to match against (in case file_name is a path)
+    pure_name = os.path.basename(file_name)
+    file_root, file_extension = os.path.splitext(pure_name)
+
+    # 1. Collect files
+    history_files = []
+    for dirpath, dirnames, files in os.walk(history_dir):
+        for f in files:
+            if f.startswith(file_root) and f.endswith(file_extension):
+                # We store the full path to ensure sorting and returning work correctly
+                full_path = os.path.join(dirpath, f)
+                history_files.append(full_path)
+
+    # 2. Sort by modification time (newest first)
+    # Fix: use the full path for getmtime
+    history_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+
+    # 3. Formatted Print
+    print("{0}# get_history_files for: {1}".format(base_indent, file_name))
+    print("{0}  in: {1}".format(base_indent, history_dir))
+
+    if not history_files:
+        print("{0}(No files found)".format(item_indent))
+    else:
+        for path in history_files:
+            print("####"+"{0}{1}".format(item_indent, path)+"####")
 
     return history_files
+import datetime
+
+def get_history_files(file_name, history_dir):
+    # Get the basename to match against (in case file_name is a path)
+    pure_name = os.path.basename(file_name)
+    file_root, file_extension = os.path.splitext(pure_name)
+
+    # 1. Collect full paths (needed for accurate mtime and returning)
+    history_files = []
+    for dirpath, dirnames, files in os.walk(history_dir):
+        for f in files:
+            if f.startswith(file_root) and f.endswith(file_extension):
+                full_path = os.path.join(dirpath, f)
+                history_files.append(full_path)
+
+    # 2. Sort by modification time (newest first)
+    history_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+
+    # show_history_files(file_name, history_files)
+    return history_files
+
+def show_history_files(file_name, history_files):
+    # Setup indentation strings
+    indent_level = 0
+    base_indent = "    " * indent_level
+    item_indent = "    " * (indent_level + 1)
+
+    # Formatted Print
+    print_panel("{0}# History for: {1}".format(base_indent, file_name))
+
+    if not history_files:
+        print_panel("{0}(No history files found)".format(item_indent))
+    else:
+        for path in history_files:
+            mtime = os.path.getmtime(path)
+            dt_str = datetime.datetime.fromtimestamp(mtime).strftime('%d-%m-%Y %H:%M:%S')
+
+            # Get just the filename
+            short_name = os.path.basename(path)
+
+            print_panel("{0}[{1}] {2}".format(item_indent, dt_str, short_name))
 
 def history_entry_name(file_name, history_dir):
     file_root, file_extension = os.path.splitext(file_name)
@@ -78,11 +181,23 @@ def history_entry_name(file_name, history_dir):
 
     raise RuntimeError('Unable to create a unique history entry name.')
 
+def is_within_root(target_path, history_root):
+    # Get absolute paths to ensure comparison is accurate
+    target = os.path.abspath(target_path)
+    root = os.path.abspath(history_root)
+
+    # Get the relative path from root to target
+    rel = os.path.relpath(target, root)
+
+    # If the relative path starts with '..', it means target is "above" root
+    return not (rel == ".." or rel.startswith(".." + os.sep))
+
 def is_inside_history_root(file_path):
     history_root = os.path.abspath(get_history_root())
     target_path = os.path.abspath(file_path)
     try:
-        return os.path.commonpath([target_path, history_root]) == history_root
+        # return os.path.commonpath([target_path, history_root]) == history_root
+        return is_within_root(target_path, history_root)
     except ValueError:
         return False
 
@@ -210,6 +325,7 @@ class HistorySave(sublime_plugin.EventListener):
             t.start()
 
     def process_history(self, file_path):
+        my_log("# process_history  #")
         if file_path == None:
             status_msg('File not saved, path does not exist.')
             return
@@ -320,7 +436,7 @@ class HistoryOpen(sublime_plugin.TextCommand):
 
 class HistoryCompare(sublime_plugin.TextCommand):
 
-    def run(self, edit, snapshots=False, sbs=False):
+    def run(self, edit, snapshots=False, sbs=False,winmerge=False):
 
         if not self.view.file_name():
             status_msg("not a valid file.")
@@ -351,6 +467,9 @@ class HistoryCompare(sublime_plugin.TextCommand):
             if sbs:
                 HistorySbsCompare.vars = self.view, from_file[0], to_file[0]
                 self.view.window().run_command("history_sbs_compare")
+            elif winmerge:
+                HistoryWinmerge.vars = self.view, from_file[0], to_file[0]
+                self.view.window().run_command("history_winmerge")
             else:
                 self.view.run_command('show_diff', {'from_file': from_file, 'to_file': to_file})
 
@@ -509,7 +628,7 @@ class HistoryCreateNamedSnapshot(sublime_plugin.TextCommand):
             elif choice == sublime.DIALOG_YES:
                 i = 2
                 while os.path.exists(snapshot_path):
-                    snapshot_name = pre + " # " + label + " ({0})".format(i) + ext
+                    snapshot_name = pre + " # " + label + " {0}".format(i) + ext
                     snapshot_path = os.path.join(history_dir, snapshot_name)
                     i += 1
 
@@ -524,8 +643,7 @@ class HistoryOpenSnapshot(sublime_plugin.TextCommand):
 
     def run(self, edit, open=True, compare=False, replace=False, sbs=False, delete=False, autodiff=False):
 
-        # ---------------
-
+        my_log("# HistoryOpenSnapshot  #")
         def Compare(index):
             if self.view.is_dirty():
                 self.view.run_command('save')
@@ -590,6 +708,7 @@ class HistoryOpenSnapshot(sublime_plugin.TextCommand):
                 if settings.get('auto_diff') or autodiff:
                     auto_diff_pane(self.view, index, history_dir, history_files)
 
+            # my_log("# show_files ", show_files, " #")
         self.view.window().show_quick_panel(show_files, on_done)
 
 
@@ -694,6 +813,28 @@ class HistoryDelete(sublime_plugin.TextCommand):
         elif before_last == "week":
             status_msg('deleted files older than one week.')
 
+
+class HistoryWinmerge(sublime_plugin.ApplicationCommand):
+    def run(self):
+        _, sbsF1, sbsF2 = self.vars
+        import subprocess
+        subprocess.Popen(["winmerge.bat", sbsF1, sbsF2])
+
+class HistoryShowSnapshots(sublime_plugin.TextCommand):
+
+    def run(self, edit, snapshots=False, sbs=False,winmerge=False):
+
+        if not self.view.file_name():
+            status_msg("not a valid file.")
+            return
+
+        file_name = os.path.basename(self.view.file_name())
+        history_dir = get_history_subdir(self.view.file_name())
+
+        history_files = get_history_files(file_name, history_dir)
+        history_files = history_files[1:]
+        show_history_files(file_name, history_files)
+
 class HistorySbsCompare(sublime_plugin.ApplicationCommand):
 
     def run(self, callback=False):
@@ -740,7 +881,7 @@ class HistoryMenu(sublime_plugin.TextCommand):
         self.view.window().show_quick_panel(choice, on_done)
 
     def run(self, edit, compare=False):
-
+        my_log("# HistoryMenu run #")
         choice = (
             ["Open history"],
             ["Compare & Replace"],
@@ -770,6 +911,7 @@ class HistoryMenu(sublime_plugin.TextCommand):
             elif index == 5:
                 self.view.window().run_command('history_delete')
 
+        my_log("# choice " + choice + " #")
         self.view.window().show_quick_panel(choice, on_done)
 
 class HistoryReplaceDiff(sublime_plugin.TextCommand):

@@ -1,0 +1,16 @@
+{
+    "history_retention": 0,                         // number of days to keep files, 0 to disable deletion
+    // "format_timestamp": "%d.%m.%Y.%H.%M.%S",     // file_name-XXXXXXXX.file_extension
+    "format_timestamp": "{n}",                      // supports %d %m %Y %H %M %S and now:
+    "history_on_focus_lost": false,                 // {n} for sequence (01, 02, ...)
+    "history_on_load": true,
+    "portable": true, // save to 'Sublime Text/Data/.sublime/Local History/...' instead of '~/.sublime/Local History/...'
+                                                    // "history_path": "",// redirect '~/.sublime/Local History/...' to some other place if "portable": false
+    "file_size_limit": 4194304,                     // 4 MB
+
+    "skip_if_saved_within_minutes": 0,              // only save if most recent save is older than this (in minutes), 0 to disable
+    "show_full_path": false,
+    "auto_diff": false,                             // automatically opens a diff view when opening a file from history
+    "rename_tab": true,                             // rename the tab to only include the timestamp, or the message in case of snapshots
+    "auto_save_before_diff": true
+}
